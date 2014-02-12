@@ -598,12 +598,28 @@ void __init xen_pvmmu_arch_setup(void)
 	xen_enable_nmi();
 }
 
+#define _XEN_CPUID_FEAT1_DEV_NA_TS_ALLOWED 1
+#define XEN_CPUID_FEAT1_DEV_NA_TS_ALLOWED \
+	(1u<<_XEN_CPUID_FEAT1_DEV_NA_TS_ALLOWED)
+static bool __init xen_check_dev_na_ts_allowed(void)
+{
+	uint32_t pages, msr, feat1, feat2, base;
+
+	base = xen_cpuid_base();
+	cpuid(base + 2, &pages, &msr, &feat1, &feat2);
+
+	return !!(feat1 & XEN_CPUID_FEAT1_DEV_NA_TS_ALLOWED);
+}
+
 /* This function is not called for HVM domains */
 void __init xen_arch_setup(void)
 {
 	xen_panic_handler_init();
 	if (!xen_feature(XENFEAT_auto_translated_physmap))
 		xen_pvmmu_arch_setup();
+
+	if (!xen_check_dev_na_ts_allowed())
+		setup_force_cpu_cap(X86_FEATURE_EAGER_FPU);
 
 #ifdef CONFIG_ACPI
 	if (!(xen_start_info->flags & SIF_INITDOMAIN)) {
