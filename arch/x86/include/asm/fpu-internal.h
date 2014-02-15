@@ -112,6 +112,12 @@ static inline void fx_finit(struct i387_fxsave_struct *fx)
 	fx->mxcsr = MXCSR_DEFAULT;
 }
 
+static inline void f_finit(struct i387_fsave_struct *fx)
+{
+	memset(fx, 0, xstate_size);
+	fx->cwd = 0x37f;
+}
+
 extern void __sanitize_i387_state(struct task_struct *);
 
 static inline void sanitize_i387_state(struct task_struct *tsk)
@@ -378,9 +384,11 @@ static inline void drop_init_fpu(struct task_struct *tsk)
 		drop_fpu(tsk);
 	else {
 		if (use_xsave())
-			xrstor_state(init_xstate_buf, -1);
+			xrstor_state(&init_xstate_buf->xsave, -1);
+		else if (use_fxsr())
+			fxrstor_checking(&init_xstate_buf->fxsave);
 		else
-			fxrstor_checking(&init_xstate_buf->i387);
+			frstor_checking(&init_xstate_buf->fsave);
 	}
 }
 
@@ -510,8 +518,12 @@ static inline void __save_fpu(struct task_struct *tsk)
 {
 	if (use_xsave())
 		xsave_state(&tsk->thread.fpu.state->xsave, -1);
-	else
+	 else if (use_fxsr()) {
 		fpu_fxsave(&tsk->thread.fpu);
+	 } else {
+		asm volatile("fnsave %[fx]; fwait"
+			     : [fx] "=m" (tsk->thread.fpu.state->fsave));
+	 }
 }
 
 /*

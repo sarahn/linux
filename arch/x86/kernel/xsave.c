@@ -21,7 +21,7 @@ u64 pcntxt_mask;
 /*
  * Represents init state for the supported extended state.
  */
-struct xsave_struct *init_xstate_buf;
+union thread_xstate *init_xstate_buf;
 
 static struct _fpx_sw_bytes fx_sw_reserved, fx_sw_reserved_ia32;
 static unsigned int *xstate_offsets, *xstate_sizes, xstate_features;
@@ -314,12 +314,12 @@ static inline int restore_user_xstate(void __user *buf, u64 xbv, int fx_only)
 	if (use_xsave()) {
 		if ((unsigned long)buf % 64 || fx_only) {
 			u64 init_bv = pcntxt_mask & ~XSTATE_FPSSE;
-			xrstor_state(init_xstate_buf, init_bv);
+			xrstor_state(&init_xstate_buf->xsave, init_bv);
 			return fxrstor_user(buf);
 		} else {
 			u64 init_bv = pcntxt_mask & ~xbv;
 			if (unlikely(init_bv))
-				xrstor_state(init_xstate_buf, init_bv);
+				xrstor_state(&init_xstate_buf->xsave, init_bv);
 			return xrestore_user(buf, xbv);
 		}
 	} else if (use_fxsr()) {
@@ -489,22 +489,27 @@ static void __init setup_init_fpu_buf(void)
 	 */
 	init_xstate_buf = alloc_bootmem_align(xstate_size,
 					      __alignof__(struct xsave_struct));
-	fx_finit(&init_xstate_buf->i387);
-
-	if (!cpu_has_xsave)
+	if (!cpu_has_fxsr) {
+		f_finit(&init_xstate_buf->fsave);
 		return;
+	}
+	if (!cpu_has_xsave) {
+		fx_finit(&init_xstate_buf->fxsave);
+		return;
+	}
+	fx_finit(&init_xstate_buf->xsave.i387);
 
 	setup_xstate_features();
 
 	/*
 	 * Init all the features state with header_bv being 0x0
 	 */
-	xrstor_state(init_xstate_buf, -1);
+	xrstor_state(&init_xstate_buf->xsave, -1);
 	/*
 	 * Dump the init state again. This is to identify the init state
 	 * of any feature which is not represented by all zero's.
 	 */
-	xsave_state(init_xstate_buf, -1);
+	xsave_state(&init_xstate_buf->xsave, -1);
 }
 
 static enum { AUTO, ENABLE, DISABLE } eagerfpu = AUTO;
@@ -631,7 +636,9 @@ void eager_fpu_init(void)
 	init_fpu(current);
 	__thread_fpu_begin(current);
 	if (cpu_has_xsave)
-		xrstor_state(init_xstate_buf, -1);
+		xrstor_state(&init_xstate_buf->xsave, -1);
+	else if (cpu_has_fxsr)
+		fxrstor_checking(&init_xstate_buf->fxsave);
 	else
-		fxrstor_checking(&init_xstate_buf->i387);
+		frstor_checking(&init_xstate_buf->fsave);
 }
